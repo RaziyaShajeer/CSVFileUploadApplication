@@ -1,0 +1,82 @@
+﻿@using CsvFileuploadDomain.Services.DashbordModule.DTOs
+@model List<FileViewDTO>
+
+<h2>File Processing Dashboard</h2>
+@if (!string.IsNullOrEmpty(ViewBag.Message))
+{
+    <div style="color:red">
+        @ViewBag.Message
+    </div>
+}
+<!--  Input Section -->
+<form method="post" asp-action="DashBoard" asp-controller="DashBoard">
+    <input type="text" name="filePath" placeholder="Enter file path" style="width:300px;" />
+    <button type="submit">Upload File</button>
+</form>
+
+<br />
+
+
+<!-- Table -->
+<table id="filesTable" style="width:90%; margin:auto; border-collapse:collapse; box-shadow:0 4px 10px rgba(0,0,0,0.1); font-family:sans-serif;">
+    <thead style="background-color:#3498db; color:white; text-align:left;">
+        <tr>
+           
+            <th style="padding:12px;">File Path</th>
+            <th style="padding:12px;">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        
+        @foreach (var file in Model)
+        {
+            <tr id="file-@file.Id" style="transition: background-color 0.3s;">
+              
+                <td style="padding:10px;">@file.FilePath</td>
+                <td id="status-@file.Id" style="padding:10px;">@file.Status</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+
+<!--  SignalR -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+<script>
+const connection = new signalR.HubConnectionBuilder()
+    .withUrl("/fileProcessingHub")
+    .build();
+
+    connection.on("ReceiveStatusUpdate", function (fileId, status, processedRows, filePath) {
+
+        console.log("SignalR message:", fileId, status, processedRows, filePath);
+
+        let row = document.querySelector(`#file-${fileId}`);
+
+        if (!row) {
+
+            const table = document.getElementById("filesTable").getElementsByTagName('tbody')[0];
+
+            row = table.insertRow(0);
+            row.id = `file-${fileId}`;
+
+            row.insertCell(0).innerText = filePath;
+
+            const statusCell = row.insertCell(1);
+            statusCell.id = `status-${fileId}`;
+            statusCell.innerText = status;
+
+        }
+        else {
+
+            document.getElementById(`status-${fileId}`).innerText = status;
+
+        }
+
+    });
+
+connection.start()
+    .then(() => console.log("SignalR connected"))
+    .catch(err => console.error(err.toString()));
+
+</script>

@@ -1,0 +1,11 @@
+RabbitMQ Setup (Docker)
+
+Run the following command to start RabbitMQ:
+
+docker-compose up -d
+
+RabbitMQ UI:
+http://localhost:15672
+
+Username: guest
+Password: guest
