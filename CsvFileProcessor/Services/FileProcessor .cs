@@ -20,100 +20,100 @@ namespace CsvFileProcessor.Services
 		{
 			_context = context;
 		}
-		public async Task ProcessFile(string fileId)
-		{
-			var connection = new HubConnectionBuilder()
-	 .WithUrl("https://localhost:7122/fileProcessingHub") 
-	 .WithAutomaticReconnect() 
-	 .Build();
-			try
-			{
-				// Start the connection
-				await connection.StartAsync();
-				Console.WriteLine("Connected to SignalR hub");
-				int convertedId = int.Parse(fileId);
+        public async Task ProcessFile(string fileId)
+        {
+            var convertedId = int.Parse(fileId);
 
-				var fileProcess = await _context.FileProcesses.FindAsync(convertedId);
+            var fileProcess = await _context.FileProcesses.FindAsync(convertedId);
+            if (fileProcess == null)
+                return;
 
-				if (fileProcess == null)
-					return;
+            // Create connection ONCE
+            var connection = new HubConnectionBuilder()
+                .WithUrl("https://localhost:7122/fileProcessingHub")
+                .WithAutomaticReconnect()
+                .Build();
 
-				int rowNumber = fileProcess.LastProcessedRow;
+            await connection.StartAsync();
 
-				using var reader = new StreamReader(fileProcess.FilePath);
-				using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
+            try
+            {
+                int lastProcessedRow = fileProcess.LastProcessedRow;
 
-				csv.Context.Configuration.HasHeaderRecord = false;
+                using var reader = new StreamReader(fileProcess.FilePath);
+                using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
 
-				int currentRow = 0;
+                csv.Context.Configuration.HasHeaderRecord = false;
 
-				foreach (var record in csv.GetRecords<CsvRow>())
-				{
-					currentRow++;
+                var records = csv.GetRecords<CsvRow>().Skip(lastProcessedRow);
 
-					// Skip already processed rows
-					if (currentRow <= rowNumber)
-						continue;
+                int currentRow = lastProcessedRow;
 
-					var data = new CsvFileData
-					{
-						Name = record.Name,
-						Email = record.Email
-					};
+                foreach (var record in records)
+                {
+                    var data = new CsvFileData
+                    {
+                        Name = record.Name,
+                        Email = record.Email
+                    };
 
-					await _context.CsvFilesDatas.AddAsync(data);
+                    await _context.CsvFilesDatas.AddAsync(data);
 
-					rowNumber++;
+                    currentRow++;
 
-					// Change status when processing starts
-					if (rowNumber == 1)
-					{
-						fileProcess.Status = "Processing";
+                    // Update tracking
+                    fileProcess.LastProcessedRow = currentRow;
+                    fileProcess.ProcessedRows = currentRow;
+                    fileProcess.Status = "Processing";
 
-						await _context.SaveChangesAsync();
+                    // Save every 10 rows
+                    if (currentRow % 10 == 0)
+                    {
+                        await _context.SaveChangesAsync();
 
-						await connection.InvokeAsync("SendStatusUpdate",fileProcess.Id,"Processing",fileProcess.ProcessedRows,fileProcess.FilePath
-);
-					
-					}
-
-					// Save progress every 100 rows
-					if (rowNumber % 10 == 0)
-					{
-						fileProcess.ProcessedRows = rowNumber;
-						fileProcess.LastProcessedRow = rowNumber;
-
-						await _context.SaveChangesAsync();
-					}
-
-				}
-
-				// Final update after all rows processed
-				fileProcess.Status = "Completed";
-				fileProcess.ProcessedRows = rowNumber;
-				fileProcess.LastProcessedRow = rowNumber;
-
-				await _context.SaveChangesAsync();
-				await connection.InvokeAsync("SendStatusUpdate",fileProcess.Id,"Completed",fileProcess.ProcessedRows,fileProcess.FilePath);
-				await Task.Delay(100);
-
-			}
-			catch (Exception ex)
-			{
-				// Mark failed if error occurs
-				var convertedId = int.Parse(fileId);
-				var fileProcess = await _context.FileProcesses.FindAsync(convertedId);
-
-				if (fileProcess != null)
-				{
-					fileProcess.Status = "Failed";
-					await _context.SaveChangesAsync();
-					await connection.InvokeAsync("SendStatusUpdate", fileProcess.Id,"Failed",fileProcess.ProcessedRows,fileProcess.FilePath);
-				
+                        await connection.InvokeAsync(
+                            "SendStatusUpdate",
+                            fileProcess.Id,
+                            "Processing",
+                            fileProcess.ProcessedRows,
+                            fileProcess.FilePath
+                        );
+                    }
                 }
-			}
-		}
 
-	}
+                // Final save
+                fileProcess.Status = "Completed";
+
+                await _context.SaveChangesAsync();
+
+                await connection.InvokeAsync(
+                    "SendStatusUpdate",
+                    fileProcess.Id,
+                    "Completed",
+                    fileProcess.ProcessedRows,
+                    fileProcess.FilePath
+                );
+            }
+            catch (Exception ex)
+            {
+                fileProcess.Status = "Failed";
+
+                await _context.SaveChangesAsync();
+
+                await connection.InvokeAsync(
+                    "SendStatusUpdate",
+                    fileProcess.Id,
+                    "Failed",
+                    fileProcess.ProcessedRows,
+                    fileProcess.FilePath
+                );
+            }
+            finally
+            {
+                await connection.DisposeAsync();
+            }
+        }
+
+    }
 	}
 
